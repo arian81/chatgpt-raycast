@@ -16,3 +16,7 @@ export type ConversationItem = {
   from: "human" | "gpt";
   value: string;
 };
+
+export interface Template extends Answer {
+  questionId: string;
+}

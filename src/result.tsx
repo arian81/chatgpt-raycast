@@ -22,7 +22,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AnswerDetailView } from "./answer-detail";
 import { defaultProfileImage } from "./profile-image";
 import { shareConversation } from "./share-gpt";
-import { Answer, ChatAnswer, ConversationItem } from "./type";
+import { Answer, ChatAnswer, ConversationItem, Template } from "./type";
 
 const FullTextInput = ({ onSubmit }: { onSubmit: (text: string) => void }) => {
   const [text, setText] = useState<string>("");
@@ -50,6 +50,7 @@ export default function ChatGPT() {
   const [conversation, setConversation] = useState<ChatGPTConversation>();
   const [answers, setAnswers] = useState<ChatAnswer[]>([]);
   const [savedAnswers, setSavedAnswers] = useState<Answer[]>([]);
+  const [savedTemplates, setSavedTemplates] = useState<Template[]>([]);
   const [history, setHistory] = useState<Answer[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchText, setSearchText] = useState<string>("");
@@ -84,12 +85,29 @@ export default function ChatGPT() {
   }, []);
 
   useEffect(() => {
+    (async () => {
+      const storedSavedTemplates = await LocalStorage.getItem<string>("savedTemplates");
+
+      if (!storedSavedTemplates) {
+        setSavedTemplates([]);
+      } else {
+        const templates: Template[] = JSON.parse(storedSavedTemplates);
+        setSavedTemplates((previous) => [...previous, ...templates]);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
     LocalStorage.setItem("savedAnswers", JSON.stringify(savedAnswers));
   }, [savedAnswers]);
 
   useEffect(() => {
     LocalStorage.setItem("history", JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    LocalStorage.setItem("savedTemplates", JSON.stringify(savedTemplates));
+  }, [savedTemplates]);
 
   useEffect(() => {
     (async () => {
@@ -117,6 +135,19 @@ export default function ChatGPT() {
       setHistory([...history, answer]);
     },
     [setHistory, history]
+  );
+
+  const handleSaveTemplate = useCallback(
+    async (template: Template) => {
+      const toast = await showToast({
+        title: "Saving your template...",
+        style: Toast.Style.Animated,
+      });
+      setSavedTemplates([...savedTemplates, template]);
+      toast.title = "Template saved!";
+      toast.style = Toast.Style.Success;
+    },
+    [setSavedTemplates, savedTemplates]
   );
 
   const [chatGPT] = useState(() => {
@@ -235,6 +266,23 @@ export default function ChatGPT() {
             icon={Icon.Star}
             title="Save Answer"
             onAction={() => handleSaveAnswer(answer)}
+            shortcut={{ modifiers: ["cmd"], key: "s" }}
+          />
+          <Action
+            icon={Icon.Star}
+            title="Save Template"
+            onAction={() => {
+              const template: Template = {
+                id: uuidv4(),
+                question: answer.question,
+                answer: answer.answer,
+                questionId: answer.id,
+                conversationId: answer.conversationId,
+                createdAt: answer.createdAt,
+                savedAt: new Date().toISOString(),
+              };
+              handleSaveTemplate(template);
+            }}
             shortcut={{ modifiers: ["cmd"], key: "s" }}
           />
           <Action
@@ -362,22 +410,54 @@ export default function ChatGPT() {
           icon={Icon.QuestionMark}
         />
       ) : (
-        answers
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .map((answer, i) => {
-            const currentAnswer = answer.done ? answer.answer : answer.partialAnswer;
-            const markdown = `${currentAnswer}`;
-            return (
-              <List.Item
-                id={answer.id}
-                key={answer.id}
-                accessories={[{ text: `#${answers.length - i}` }]}
-                title={answer.question}
-                detail={<AnswerDetailView answer={answer} markdown={markdown} />}
-                actions={isLoading ? undefined : getActionPanel(answer)}
-              />
-            );
-          })
+        <>
+          <List.Section title="Result">
+            {answers
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .map((answer, i) => {
+                const currentAnswer = answer.done ? answer.answer : answer.partialAnswer;
+                const markdown = `${currentAnswer}`;
+                return (
+                  <List.Item
+                    id={answer.id}
+                    key={answer.id}
+                    accessories={[{ text: `#${answers.length - i}` }]}
+                    title={answer.question}
+                    detail={<AnswerDetailView answer={answer} markdown={markdown} />}
+                    actions={isLoading ? undefined : getActionPanel(answer)}
+                  />
+                );
+              })}
+          </List.Section>
+          {savedTemplates.length > 0 && (
+            <List.Section title="Template">
+              {savedTemplates
+                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                .map((answer, i) => {
+                  return (
+                    <List.Item
+                      id={answer.id}
+                      key={answer.id}
+                      accessories={[{ text: `#${answers.length - i}` }]}
+                      title={answer.question}
+                      detail={<AnswerDetailView answer={answer} />}
+                      actions={
+                        <ActionPanel>
+                          <Action
+                            title="Use answer"
+                            icon={Icon.ArrowRight}
+                            onAction={() => {
+                              getAnswer(searchText);
+                            }}
+                          />
+                        </ActionPanel>
+                      }
+                    />
+                  );
+                })}
+            </List.Section>
+          )}
+        </>
       )}
     </List>
   );
