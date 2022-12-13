@@ -15,7 +15,7 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { ChatGPTAPI, ChatGPTConversation } from "chatgpt";
+import { ChatGPTAPI, ChatGPTConversation, getOpenAIAuth } from "chatgpt";
 import { useCallback, useEffect, useState } from "react";
 import say from "say";
 import { v4 as uuidv4 } from "uuid";
@@ -52,6 +52,7 @@ const FullTextInput = ({ onSubmit }: { onSubmit: (text: string) => void }) => {
 
 export default function ChatGPT() {
   const [conversationId, setConversationId] = useState<string>(uuidv4());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>();
   const [conversation, setConversation] = useState<ChatGPTConversation>();
   const [answers, setAnswers] = useState<ChatAnswer[]>([]);
   const [savedAnswers, setSavedAnswers] = useState<Answer[]>([]);
@@ -60,6 +61,18 @@ export default function ChatGPT() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchText, setSearchText] = useState<string>("");
   const [selectedAnswerId, setSelectedAnswer] = useState<string | null>(null);
+
+  const [user] = useState(() => {
+    const email: string = getPreferenceValues<{
+      email: string;
+    }>().email;
+
+    const password: string = getPreferenceValues<{
+      password: string;
+    }>().password;
+
+    return { email, password };
+  });
 
   const { pop, push } = useNavigation();
 
@@ -117,8 +130,35 @@ export default function ChatGPT() {
 
   useEffect(() => {
     (async () => {
-      const initConversation = await chatGPT.getConversation();
-      setConversation(initConversation);
+      const openAIAuth = await getOpenAIAuth({ email: user.email, password: user.password });
+      const chatGPT = new ChatGPTAPI({ ...openAIAuth });
+      await chatGPT.ensureAuth();
+
+      const toast = await showToast({
+        title: "Validating your token...",
+        style: Toast.Style.Animated,
+      });
+
+      if (await chatGPT.getIsAuthenticated()) {
+        setIsAuthenticated(true);
+        const initConversation = await chatGPT?.getConversation();
+        setConversation(initConversation);
+      } else {
+        await confirmAlert({
+          title: "Your preferences value is invalid",
+          icon: Icon.Gear,
+          message:
+            "Please go to the preferences and enter a new valid session token, clearance token, or user agent value.",
+          primaryAction: {
+            title: "Open preferences",
+            style: Alert.ActionStyle.Destructive,
+            onAction: () => {
+              openExtensionPreferences();
+              setIsLoading(false);
+            },
+          },
+        });
+      }
     })();
   }, []);
 
@@ -158,51 +198,13 @@ export default function ChatGPT() {
     [setInitialQuestions, initialQuestions]
   );
 
-  const [chatGPT] = useState(() => {
-    const sessionToken = getPreferenceValues<{
-      sessionToken: string;
-    }>().sessionToken;
-
-    const clearanceToken = getPreferenceValues<{
-      clearanceToken: string;
-    }>().clearanceToken;
-
-    const userAgent = getPreferenceValues<{
-      userAgent: string;
-    }>().userAgent;
-
-    return new ChatGPTAPI({ sessionToken, clearanceToken, userAgent });
-  });
-
   async function getAnswer(question: string) {
     setIsLoading(true);
 
     const toast = await showToast({
-      title: "Validating your token...",
+      title: "Getting your answer...",
       style: Toast.Style.Animated,
     });
-
-    const isAuthenticated: boolean = await chatGPT.getIsAuthenticated();
-
-    if (!isAuthenticated) {
-      await confirmAlert({
-        title: "Your preferences value is invalid",
-        icon: Icon.Gear,
-        message:
-          "Please go to the preferences and enter a new valid session token, clearance token, or user agent value.",
-        primaryAction: {
-          title: "Open preferences",
-          style: Alert.ActionStyle.Destructive,
-          onAction: () => {
-            openExtensionPreferences();
-            setIsLoading(false);
-          },
-        },
-      });
-    }
-
-    toast.title = "Getting your answer...";
-    toast.style = Toast.Style.Animated;
 
     const answerId = uuidv4();
     const baseAnswer: ChatAnswer = {
